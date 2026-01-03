@@ -14,6 +14,7 @@
         .card { border: none; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         .btn-success { background-color: #198754; border: none; }
         .btn-success:hover { background-color: #146c43; }
+        .table-hover tbody tr:hover { background-color: #f1f1f1; }
     </style>
 </head>
 <body>
@@ -42,8 +43,7 @@
                             <thead class="table-light">
                                 <tr>
                                     <th class="ps-4">Waktu Scan</th>
-                                    <th>ID User</th>
-                                    <th>Status</th>
+                                    <th>Karyawan</th> <th>Status</th>
                                     <th>Keterangan</th>
                                 </tr>
                             </thead>
@@ -52,6 +52,9 @@
                             </tbody>
                         </table>
                     </div>
+                </div>
+                <div class="card-footer text-muted text-center small py-3">
+                    Auto-refresh setiap 30 detik
                 </div>
             </div>
         </div>
@@ -68,7 +71,7 @@
         });
     }
 
-    // 2. Fungsi Load Data Tabel (Preview 50 Data)
+    // 2. Fungsi Load Data Tabel (Preview 50 Data Terakhir)
     async function loadData() {
         const tbody = document.getElementById('table-body');
         const icon = document.getElementById('icon-refresh');
@@ -80,18 +83,32 @@
             tbody.innerHTML = '';
 
             if (data.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4">Kosong.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4">Belum ada data absensi.</td></tr>`;
             } else {
                 data.forEach(row => {
-                    let statusLabel = row.status == 0 ? '<span class="badge bg-success">Check In</span>' : 
-                                      (row.status == 1 ? '<span class="badge bg-danger">Check Out</span>' : '<span class="badge bg-secondary">Log</span>');
-                    
-                    let ket = row.status == 0 ? 'Masuk' : (row.status == 1 ? 'Pulang' : '-');
+                    // Logika Label Status
+                    let statusLabel = '<span class="badge bg-secondary">Log</span>';
+                    let ket = '-';
+
+                    if (row.status == 0) {
+                        statusLabel = '<span class="badge bg-success">Check In</span>';
+                        ket = 'Masuk';
+                    } else if (row.status == 1) {
+                        statusLabel = '<span class="badge bg-danger">Check Out</span>';
+                        ket = 'Pulang';
+                    }
+
+                    // Logika Nama Karyawan (Jika null tampilkan ID merah)
+                    const namaKaryawan = row.nama ? row.nama : `<span class="text-danger fw-bold">ID: ${row.finger_id}</span>`;
+                    const jabatan = row.jabatan ? row.jabatan : (row.nama ? '-' : '<small class="text-danger">Belum Terdaftar</small>');
 
                     tbody.innerHTML += `
                         <tr>
                             <td class="ps-4 fw-bold text-dark">${formatTanggal(row.scan_time)}</td>
-                            <td>${row.finger_id}</td>
+                            <td>
+                                <div class="fw-bold text-primary">${namaKaryawan}</div>
+                                <div class="small text-muted">${jabatan}</div>
+                            </td>
                             <td>${statusLabel}</td>
                             <td class="text-muted small">${ket}</td>
                         </tr>
@@ -100,53 +117,128 @@
             }
         } catch (error) {
             console.error(error);
+            tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-4">Gagal mengambil data.</td></tr>`;
         } finally {
             icon.classList.remove('fa-spin');
         }
     }
 
-    // 3. FUNGSI DOWNLOAD EXCEL (Script Baru)
+    // 3. FUNGSI DOWNLOAD EXCEL (REKAP HARIAN / MATRIX)
     async function downloadExcel() {
         const btn = document.querySelector('.btn-success');
         const originalText = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+        
+        // Ubah tombol jadi loading
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Memproses...';
         btn.disabled = true;
 
         try {
-            // Request ke API dengan mode=export agar dapat data lebih banyak
+            // A. Ambil semua data (Mode Export)
             const response = await fetch('/.netlify/functions/api?mode=export');
-            const data = await response.json();
+            const rawData = await response.json();
 
-            if (data.length === 0) {
+            if (rawData.length === 0) {
                 alert("Tidak ada data untuk di-export.");
                 return;
             }
 
-            // A. Rapikan Data sebelum jadi Excel
-            // Kita ingin header Excel-nya bahasa Indonesia, bukan nama kolom database
-            const excelData = data.map(item => {
+            // B. LOGIKA PIVOT (Penggabungan Data)
+            // Mengubah Log Mentah menjadi: 1 Baris = 1 Orang per Hari (Ada Jam Masuk & Pulang)
+            let rekapData = {};
+
+            rawData.forEach(item => {
                 const dateObj = new Date(item.scan_time);
+                // Kunci Unik: ID + Tanggal (Contoh: 101_2024-01-03)
+                const tglString = dateObj.toLocaleDateString('id-ID'); 
+                const uniqueKey = item.finger_id + '_' + tglString;
+
+                // Jika belum ada data hari ini, buat baru
+                if (!rekapData[uniqueKey]) {
+                    rekapData[uniqueKey] = {
+                        "ID": item.finger_id,
+                        "Nama Karyawan": item.nama || "Tanpa Nama",
+                        "Jabatan": item.jabatan || "-",
+                        "Tanggal": tglString,
+                        "Jam Masuk": item.scan_time,  // Sementara isi scan pertama
+                        "Jam Pulang": item.scan_time, // Sementara isi scan pertama
+                        "_rawMasuk": new Date(item.scan_time), // Helper untuk sorting
+                        "_rawPulang": new Date(item.scan_time) // Helper untuk sorting
+                    };
+                } else {
+                    // Jika sudah ada, bandingkan jamnya
+                    const scanBaru = new Date(item.scan_time);
+                    
+                    // Cari jam paling pagi untuk MASUK
+                    if (scanBaru < rekapData[uniqueKey]["_rawMasuk"]) {
+                        rekapData[uniqueKey]["_rawMasuk"] = scanBaru;
+                        rekapData[uniqueKey]["Jam Masuk"] = item.scan_time;
+                    }
+                    // Cari jam paling malam untuk PULANG
+                    if (scanBaru > rekapData[uniqueKey]["_rawPulang"]) {
+                        rekapData[uniqueKey]["_rawPulang"] = scanBaru;
+                        rekapData[uniqueKey]["Jam Pulang"] = item.scan_time;
+                    }
+                }
+            });
+
+            // C. Formatting Akhir (Rapikan Jam)
+            const finalExcelData = Object.values(rekapData).map(row => {
+                const masuk = new Date(row["Jam Masuk"]);
+                const pulang = new Date(row["Jam Pulang"]);
+                
+                let jamMasukStr = masuk.toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'});
+                let jamPulangStr = pulang.toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'});
+
+                // Jika Masuk & Pulang jamnya sama persis, berarti cuma absen 1x (Lupa absen)
+                // Kita kosongkan salah satu agar terlihat bahwa dia tidak lengkap
+                if (row["Jam Masuk"] === row["Jam Pulang"]) {
+                    jamPulangStr = "-"; 
+                }
+
                 return {
-                    "ID Karyawan": item.finger_id,
-                    "Tanggal": dateObj.toLocaleDateString('id-ID'), // Kolom Tanggal
-                    "Jam": dateObj.toLocaleTimeString('id-ID'),     // Kolom Jam
-                    "Status": item.status == 0 ? "Masuk" : (item.status == 1 ? "Pulang" : "Lainnya"),
-                    "Waktu Original": item.scan_time
+                    "ID": row["ID"],
+                    "Nama Karyawan": row["Nama Karyawan"],
+                    "Jabatan": row["Jabatan"],
+                    "Tanggal": row["Tanggal"],
+                    "Jam Masuk": jamMasukStr,
+                    "Jam Pulang": jamPulangStr
                 };
             });
 
-            // B. Buat Workbook (File Excel Virtual)
-            const worksheet = XLSX.utils.json_to_sheet(excelData);
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, "Laporan Absensi");
+            // Sortir data berdasarkan Tanggal (Terbaru di atas)
+            finalExcelData.sort((a, b) => {
+                // Parsing tanggal manual karena format locale string indonesia (dd/mm/yyyy)
+                const partsA = a.Tanggal.split('/');
+                const partsB = b.Tanggal.split('/');
+                const dateA = new Date(partsA[2], partsA[1] - 1, partsA[0]);
+                const dateB = new Date(partsB[2], partsB[1] - 1, partsB[0]);
+                return dateB - dateA;
+            });
 
-            // C. Download File
-            const fileName = `Laporan_Absensi_${new Date().toISOString().slice(0,10)}.xlsx`;
+            // D. Buat File Excel
+            const worksheet = XLSX.utils.json_to_sheet(finalExcelData);
+            
+            // Atur lebar kolom otomatis
+            const wscols = [
+                {wch: 10}, // ID
+                {wch: 25}, // Nama
+                {wch: 15}, // Jabatan
+                {wch: 15}, // Tanggal
+                {wch: 15}, // Masuk
+                {wch: 15}  // Pulang
+            ];
+            worksheet['!cols'] = wscols;
+
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Rekap Harian");
+
+            // Download
+            const fileName = `Laporan_Absen_Rekap_${new Date().toISOString().slice(0,10)}.xlsx`;
             XLSX.writeFile(workbook, fileName);
 
         } catch (error) {
             console.error(error);
-            alert("Gagal download excel.");
+            alert("Gagal memproses data excel.");
         } finally {
             btn.innerHTML = originalText;
             btn.disabled = false;
@@ -155,6 +247,9 @@
 
     // Load data saat pertama kali buka
     document.addEventListener('DOMContentLoaded', loadData);
+    
+    // Auto refresh tiap 30 detik
+    setInterval(loadData, 30000);
 </script>
 
 </body>
