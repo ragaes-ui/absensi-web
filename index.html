@@ -7,12 +7,13 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+
     <style>
         body { background-color: #f8f9fa; }
         .card { border: none; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        .refresh-btn { cursor: pointer; transition: transform 0.2s; }
-        .refresh-btn:hover { transform: rotate(180deg); }
-        .table-hover tbody tr:hover { background-color: #f1f1f1; }
+        .btn-success { background-color: #198754; border: none; }
+        .btn-success:hover { background-color: #146c43; }
     </style>
 </head>
 <body>
@@ -22,35 +23,35 @@
         <div class="col-md-10">
             <div class="card">
                 <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center py-3" style="border-radius: 15px 15px 0 0;">
-                    <h5 class="mb-0"><i class="fas fa-fingerprint me-2"></i>Data Absensi Solution X802</h5>
-                    <button class="btn btn-sm btn-light text-primary" onclick="loadData()">
-                        <i class="fas fa-sync-alt refresh-btn" id="icon-refresh"></i> Refresh
-                    </button>
+                    <h5 class="mb-0"><i class="fas fa-fingerprint me-2"></i>Data Absensi X802</h5>
+                    
+                    <div>
+                        <button class="btn btn-sm btn-success me-2" onclick="downloadExcel()">
+                            <i class="fas fa-file-excel me-1"></i> Export Excel
+                        </button>
+                        
+                        <button class="btn btn-sm btn-light text-primary" onclick="loadData()">
+                            <i class="fas fa-sync-alt" id="icon-refresh"></i>
+                        </button>
+                    </div>
                 </div>
+                
                 <div class="card-body p-0">
                     <div class="table-responsive">
                         <table class="table table-hover mb-0 align-middle">
                             <thead class="table-light">
                                 <tr>
                                     <th class="ps-4">Waktu Scan</th>
-                                    <th>ID User (Mesin)</th>
+                                    <th>ID User</th>
                                     <th>Status</th>
                                     <th>Keterangan</th>
                                 </tr>
                             </thead>
                             <tbody id="table-body">
-                                <tr>
-                                    <td colspan="4" class="text-center py-4 text-muted">
-                                        <div class="spinner-border text-primary spinner-border-sm" role="status"></div>
-                                        Memuat data...
-                                    </td>
-                                </tr>
+                                <tr><td colspan="4" class="text-center py-4">Memuat...</td></tr>
                             </tbody>
                         </table>
                     </div>
-                </div>
-                <div class="card-footer text-muted text-center small py-3">
-                    Auto-refresh setiap 30 detik
                 </div>
             </div>
         </div>
@@ -58,7 +59,7 @@
 </div>
 
 <script>
-    // Fungsi untuk memformat tanggal agar enak dibaca (Indonesia)
+    // 1. Fungsi Format Tanggal (Indonesia)
     function formatTanggal(isoString) {
         const date = new Date(isoString);
         return date.toLocaleString('id-ID', { 
@@ -67,62 +68,93 @@
         });
     }
 
-    // Fungsi Utama mengambil data dari Netlify Function
+    // 2. Fungsi Load Data Tabel (Preview 50 Data)
     async function loadData() {
         const tbody = document.getElementById('table-body');
         const icon = document.getElementById('icon-refresh');
-        
-        // Animasi loading
         icon.classList.add('fa-spin');
         
         try {
-            // Panggil API yang baru kita buat
-            const response = await fetch('/.netlify/functions/api');
+            const response = await fetch('/.netlify/functions/api'); // Default limit 50
             const data = await response.json();
-
             tbody.innerHTML = '';
 
             if (data.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4">Belum ada data absensi.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4">Kosong.</td></tr>`;
             } else {
                 data.forEach(row => {
-                    // Logika Status (Sesuaikan dengan setting mesin Anda)
-                    // Biasanya: 0=Masuk, 1=Pulang, 4=Lembur Masuk, 5=Lembur Pulang
-                    let statusLabel = '<span class="badge bg-secondary">Log</span>';
-                    let ket = 'Scan';
+                    let statusLabel = row.status == 0 ? '<span class="badge bg-success">Check In</span>' : 
+                                      (row.status == 1 ? '<span class="badge bg-danger">Check Out</span>' : '<span class="badge bg-secondary">Log</span>');
+                    
+                    let ket = row.status == 0 ? 'Masuk' : (row.status == 1 ? 'Pulang' : '-');
 
-                    if (row.status == 0) {
-                        statusLabel = '<span class="badge bg-success">Check In</span>';
-                        ket = 'Masuk Kerja';
-                    } else if (row.status == 1) {
-                        statusLabel = '<span class="badge bg-danger">Check Out</span>';
-                        ket = 'Pulang Kerja';
-                    }
-
-                    const html = `
+                    tbody.innerHTML += `
                         <tr>
                             <td class="ps-4 fw-bold text-dark">${formatTanggal(row.scan_time)}</td>
-                            <td><span class="badge bg-light text-dark border">ID: ${row.finger_id}</span></td>
+                            <td>${row.finger_id}</td>
                             <td>${statusLabel}</td>
                             <td class="text-muted small">${ket}</td>
                         </tr>
                     `;
-                    tbody.innerHTML += html;
                 });
             }
         } catch (error) {
             console.error(error);
-            tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-4">Gagal mengambil data. Cek koneksi database.</td></tr>`;
         } finally {
             icon.classList.remove('fa-spin');
         }
     }
 
-    // Jalankan saat halaman dibuka
-    document.addEventListener('DOMContentLoaded', loadData);
+    // 3. FUNGSI DOWNLOAD EXCEL (Script Baru)
+    async function downloadExcel() {
+        const btn = document.querySelector('.btn-success');
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+        btn.disabled = true;
 
-    // Auto Refresh setiap 30 detik
-    setInterval(loadData, 30000);
+        try {
+            // Request ke API dengan mode=export agar dapat data lebih banyak
+            const response = await fetch('/.netlify/functions/api?mode=export');
+            const data = await response.json();
+
+            if (data.length === 0) {
+                alert("Tidak ada data untuk di-export.");
+                return;
+            }
+
+            // A. Rapikan Data sebelum jadi Excel
+            // Kita ingin header Excel-nya bahasa Indonesia, bukan nama kolom database
+            const excelData = data.map(item => {
+                const dateObj = new Date(item.scan_time);
+                return {
+                    "ID Karyawan": item.finger_id,
+                    "Tanggal": dateObj.toLocaleDateString('id-ID'), // Kolom Tanggal
+                    "Jam": dateObj.toLocaleTimeString('id-ID'),     // Kolom Jam
+                    "Status": item.status == 0 ? "Masuk" : (item.status == 1 ? "Pulang" : "Lainnya"),
+                    "Waktu Original": item.scan_time
+                };
+            });
+
+            // B. Buat Workbook (File Excel Virtual)
+            const worksheet = XLSX.utils.json_to_sheet(excelData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Laporan Absensi");
+
+            // C. Download File
+            const fileName = `Laporan_Absensi_${new Date().toISOString().slice(0,10)}.xlsx`;
+            XLSX.writeFile(workbook, fileName);
+
+        } catch (error) {
+            console.error(error);
+            alert("Gagal download excel.");
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    // Load data saat pertama kali buka
+    document.addEventListener('DOMContentLoaded', loadData);
 </script>
 
 </body>
