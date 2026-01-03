@@ -1,0 +1,8 @@
+[build]
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/iclock/cdata"
+  to = "/.netlify/functions/cdata"
+  status = 200
+  force = true
