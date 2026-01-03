@@ -6,3 +6,9 @@
   to = "/.netlify/functions/cdata"
   status = 200
   force = true
+
+[[redirects]]
+  from = "/iclock/getrequest"
+  to = "/.netlify/functions/cdata"
+  status = 200
+  force = true
